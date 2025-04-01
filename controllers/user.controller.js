@@ -1,7 +1,10 @@
-import { log } from "console";
 import User from "../models/User.models.js"
 import sendMail from "../utils/sendMail.utils.js"
 import crypto from "crypto";
+import jwt from "jsonwebtoken";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const regesterUser= async (req,res)=>{
     // take data from body
@@ -77,17 +80,17 @@ const regesterUser= async (req,res)=>{
 
 const verifyUser= async(req,res)=>{
     const { token } = req.params;
-    const newUser= await User.findOne({
+    const user= await User.findOne({
         verificationToken:token,
         verificationTokenExpiry : {$gt: Date.now()},
     });
     try {       
-        if(newUser){
-            newUser.isVerified = true,
-            newUser.verificationToken = undefined,
-            newUser.verificationTokenExpiry = undefined,
+        if(user){
+            user.isVerified = true,
+            user.verificationToken = undefined,
+            user.verificationTokenExpiry = undefined,
             
-            await newUser.save();
+            await user.save();
             
             return res.status(200).json({
                 success : true,
@@ -103,6 +106,86 @@ const verifyUser= async(req,res)=>{
     }  
 }
 
+const login = async(req,res)=>{
+    //take email and password
+    const{email , password}= req.body;
+    if(!password ||!email){
+        return res.status(400).json({
+            success: false,
+            message : "All feilds are required",
+        })
+    }
 
+    try {
+        const user = await User.findOne({
+            email,
+        })
 
-export { regesterUser , verifyUser };
+        if(!user){
+            return res.status(400).json({
+                success: false,
+                message : "User is not regestered",
+            })
+        }
+
+        //check weather the user is verified or not
+        if(!user.isVerified)
+        {
+            return res.status(400).json({
+                success: false,
+                message : "User is not verified",
+            })
+        }
+
+        //now lets compare and check the user and verify it
+
+        const compPass = user.comparePassword(password);
+        if(!compPass){
+            return res.status(400).json({
+                success: false,
+                message : "Invalid email or password",
+            });
+        }
+
+        //now make a token for the same
+        const token = jwt.sign(
+            {
+                id : user._id, name:user.name,
+            },
+            process.env.SECRATE_KEY,
+            {
+                expiresIn : "24h",
+            }
+        )
+
+        // now lets send the cookie in the response 
+        res.cookie("token", token, 
+            {
+                maxAge : 24*60*60*1000,
+                secure : true,
+                httpOnly : true,
+            }
+        )
+
+        res.status(200).json({
+            succees : true ,
+            message:"User logged in sucessfully",
+            token,
+            user : {
+                id:user._id,
+                name:user.name,
+                role:user.role,
+            }
+        })
+
+    } catch (err) {
+        console.log("Cannot verify user for login /n err :",error);
+        return res.status(200).json({
+            success : false,
+            message : "Internal server issue, user is not logged in",
+        });
+    }
+
+}
+
+export { regesterUser , verifyUser ,login };
